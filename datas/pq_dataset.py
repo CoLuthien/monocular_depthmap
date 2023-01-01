@@ -49,13 +49,14 @@ class BaseParquetDataset(data.Dataset):
         return item
 
     def load_parquet(self):
-        cur = self.local_parquet_index
-        next = cur + self.num_cache
-        if next > self.local_parquet_length:
-            next = self.local_parquet_length
+        next = self.local_parquet_index
+        if next >= self.local_parquet_length:
+            next = 0
+            self.local_parquet_index = 0
 
         table = pq.read_table(
-            self.local_parquet_list[cur], columns=self.use_column).to_pylist()
+            self.local_parquet_list[next], columns=self.use_column).to_pylist()
+        self.local_parquet_index += 1
         return table
 
     def __len__(self):
@@ -63,7 +64,7 @@ class BaseParquetDataset(data.Dataset):
 
     def __getitem__(self, index) -> None:
         # check current file end
-        if len(self.local_parquet_data) < 1:
+        if len(self.local_parquet_data) <= 1:
             # if we use all parquet data in current cache
             if self.local_parquet_index > self.local_parquet_length:
                 self.local_parquet_index = 0

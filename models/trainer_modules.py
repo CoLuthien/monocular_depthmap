@@ -14,7 +14,10 @@ from torchvision import transforms
 from torchvision.datasets import MNIST
 import torch
 
-from .encoder_blocks import EncoderBlock, DepthDecoder, PoseDecoder, ImageDecoder, DepthProjection
+from models.encoder_blocks import *
+from models.decoder_blocks import *
+from models.reference_layers import *
+from losses.image import *
 
 
 class Model(pl.LightningModule):
@@ -27,50 +30,81 @@ class Model(pl.LightningModule):
         self.depth_decoder = DepthDecoder(dim)
         # in feature map -> , out -> N x 1 x 4 x 4
         self.pose_decoder = PoseDecoder(dim)
-        self.depth_projection = DepthProjection()
+        self.depth_projection = BackprojectDepth(4, 256)
+        self.to_depth = Disp2Depth(0.5, 100)
+        self.to_image = Project3D(4, 256)
         # in -> N x 3 x W x H -> N x 3 x W x H
-        self.image_decoder = ImageDecoder(3)
 
-        self.bce_loss = nn.BCELoss()
-        self.l1_loss = nn.L1Loss()
+        self.bce = nn.BCEWithLogitsLoss()
+        self.projection_loss = ReprojectionLoss()
+        self.smooth_loss = SmoothingLoss()
 
-        self.my_logger = TensorBoardLogger("./")
+    def forward(self, batch):
 
-    def forward(self, x: Tuple):
-        r0, r1 = x
+        imgs, cam, cam_inv = batch
+        features = list(map(lambda img: self.encoder(img), imgs))
 
-        f0, f1 = self.encoder(r0), self.encoder(r1)
+        disps = list(map(lambda f: self.depth_decoder(f), features))
+        depths = list(map(lambda disp: self.to_depth(disp), disps))
 
-        p0, p1 = self.pose_decoder(f0), self.pose_decoder(f1)
+        pose = self.pose_decoder([feature[-1] for feature in features])
 
-        d0, d1 = self.depth_decoder(f0), self.depth_decoder(f1)
+        clouds = list(map(
+            lambda depth: self.depth_projection(depth, cam_inv),
+            depths))
 
-        dp0, dp1 = self.depth_projection(d0, p1), self.depth_projection(d1, p0)
-
-        i0, i1 = self.image_decoder(d0, p0), self.image_decoder(d1, p1)
+        pixels = list(
+            map(lambda cloud: self.to_image(cloud, cam, pose),
+                clouds))
 
         return {
-            'image': (i0, i1),
-            'depth': (d0, d1),
-            'proj_depth': (dp0, dp1),
+            'pixel_sample': pixels,
+            'disp': disps,
+            'depth': depths,
+            'cloud': clouds,
         }
 
     def training_step(self, batch, batch_idx):
-        i0s, i1s = batch
+        imgs, _, _ = batch
         results = self(batch)
 
-        i0_gen, i1_gen = results['image']
-        d0_gen, d1_gen = results['depth']
-        dp0_gen, dp1_gen = results['proj_depth']
+        pixels = results['pixel_sample']
+        sampled_images = [F.grid_sample(img, pixel)
+                          for img, pixel in zip(imgs, pixels)]
 
-        bce_i0_loss = self.l1_loss(i0s, i0_gen)
-        bce_i1_loss = self.l1_loss(i1s, i1_gen)
+        losses = [self.projection_loss(pred, imgs[0])
+                  for pred in sampled_images]
 
-        d0_dp1_loss = self.l1_loss(d0_gen, dp1_gen)
-        d1_dp0_loss = self.l1_loss(d1_gen, dp0_gen)
+        smooth_loss = []
+        disps = results['disp']
+        for disp, target in zip(disps, imgs):
+            mean = disp.mean(2, True).mean(3, True)
+            norm = disp / (mean + 1e-7)
+            smooth_loss.append(self.smooth_loss(norm, target))
 
-        # loss calculation
-        return bce_i0_loss + bce_i1_loss + d0_dp1_loss + d1_dp0_loss
+        losses = losses + smooth_loss
+
+        loss = torch.empty_like(losses[0])
+
+        for l in losses:
+            loss += l
+        idx = (batch_idx) * (self.current_epoch + 1) 
+        if (idx % 100 == 0):
+            tb = self.logger.experiment
+            self.logger.experiment.add_image("reference",
+                                             imgs[0],
+                                             idx,
+                                             dataformats="NCHW")
+            self.logger.experiment.add_image("disp",
+                                             disps[0],
+                                             idx,
+                                             dataformats="NCHW")
+            self.logger.experiment.add_image("sampled",
+                                             sampled_images[0],
+                                             idx,
+                                             dataformats="NCHW")
+
+        return l
 
     def configure_optimizers(self) -> Any:
         optim = torch.optim.Adamax(self.parameters(), lr=1e-4)
