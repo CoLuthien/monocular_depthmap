@@ -101,11 +101,13 @@ class Project3D(nn.Module):
         n, c, h = points.size()
         K = K.view(n, 4, 4)
         T = T.view(n, 4, 4)
-        P = torch.matmul(K, T)[:, :3, :]
+        P = torch.matmul(K, T)
         cam_points = torch.matmul(P, points)
 
-        pix_coords = cam_points[:, :2, :] / \
-            (cam_points[:, 2, :].unsqueeze(1) + self.eps)
+        vector = cam_points[:, :3, ...] / \
+            (cam_points[:, 3, ...].unsqueeze(1) + self.eps)
+
+        pix_coords = vector[:, :2, :] / vector[:, 2, ...]
 
         pix_coords = pix_coords.view(
             n, 2, self.width, self.width)
@@ -113,5 +115,5 @@ class Project3D(nn.Module):
         coef = 1 / (self.width - 1)
         pix_coords[..., 0] *= coef
         pix_coords[..., 1] *= coef
-        pix_coords = pix_coords * 2 - 1
+        # pix_coords = pix_coords * 2 - 1
         return pix_coords

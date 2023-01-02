@@ -18,7 +18,7 @@ class DepthDecoder(nn.Module):
         self.d0 = nn.Sequential(*[
             nn.PixelShuffle(2),
             ConvBlock(dim // 2, 1, 3, 1, 1),
-            nn.Tanh()
+            nn.Sigmoid()
         ])
         self.d1 = nn.Sequential(*[
             nn.PixelShuffle(2),
@@ -41,6 +41,8 @@ class DepthDecoder(nn.Module):
             ResBlock(dim * 8)
         ])
 
+        self.mods = [self.d0, self.d1, self.d2, self.d3, self.d4]
+
     def forward(self, x) -> torch.Tensor:
         s0 = x[0]
         s1 = x[1]
@@ -52,7 +54,7 @@ class DepthDecoder(nn.Module):
         u1 = self.d2(torch.cat([s2, u2], 1))
         u0 = self.d1(torch.cat([s1, u1], 1))
         o0 = self.d0(torch.cat([s0, u0], 1))
-        return (o0 + 1) * 0.5
+        return o0
 
 
 class PoseDecoder(nn.Module):
@@ -60,14 +62,14 @@ class PoseDecoder(nn.Module):
         super().__init__()
         squeezer = [
             nn.LazyConv2d(128, 1),
-            nn.ReLU(True)
+            nn.Mish()
         ]
 
         convs = [
-            ConvBlock(256, 256, 3, 1, 1),
             ResBlock(256),
-            nn.Conv2d(256, 1, 1, 1, 0),
-            nn.ReLU()
+            ResBlock(256),
+            nn.Conv2d(256, 2, 1, 1, 0),
+            nn.PReLU(2)
         ]
         linear = [nn.LazyLinear(16, bias=False)]
 
@@ -84,5 +86,5 @@ class PoseDecoder(nn.Module):
 
         feature = self.conv(feature).flatten(2, 3)
 
-        out = self.linear(feature).view(b, 1, 4, 4)
-        return out
+        out = self.linear(feature).view(b, 2, 4, 4)
+        return out.split(1, dim=1)

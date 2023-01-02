@@ -47,15 +47,15 @@ class Model(pl.LightningModule):
         disps = list(map(lambda f: self.depth_decoder(f), features))
         depths = list(map(lambda disp: self.to_depth(disp), disps))
 
-        pose = self.pose_decoder([feature[-1] for feature in features])
+        poses = self.pose_decoder([feature[-1] for feature in features])
 
         clouds = list(map(
             lambda depth: self.depth_projection(depth, cam_inv),
             depths))
 
         pixels = list(
-            map(lambda cloud: self.to_image(cloud, cam, pose),
-                clouds))
+            map(lambda cloud, pose: self.to_image(cloud, cam, pose),
+                clouds, poses))
 
         return {
             'pixel_sample': pixels,
@@ -88,7 +88,7 @@ class Model(pl.LightningModule):
 
         for l in losses:
             loss += l
-        idx = (batch_idx) * (self.current_epoch + 1) 
+        idx = (batch_idx) * (self.current_epoch + 1)
         if (idx % 100 == 0):
             tb = self.logger.experiment
             self.logger.experiment.add_image("reference",
