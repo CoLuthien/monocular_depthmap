@@ -62,16 +62,19 @@ class PoseDecoder(nn.Module):
         super().__init__()
         squeezer = [
             nn.LazyConv2d(128, 1),
-            nn.Mish()
+            nn.Tanh()
         ]
 
         convs = [
             ResBlock(256),
             ResBlock(256),
-            nn.Conv2d(256, 2, 1, 1, 0),
+            nn.Conv2d(256, 2, 3, 1, 1),
             nn.PReLU(2)
         ]
-        linear = [nn.LazyLinear(16, bias=False)]
+        linear = [
+            nn.LazyLinear(128, bias=True),
+            nn.LazyLinear(16)
+        ]
 
         self.squeezer = nn.Sequential(*squeezer)
         self.conv = nn.Sequential(*convs)
