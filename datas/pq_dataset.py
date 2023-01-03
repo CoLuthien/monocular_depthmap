@@ -29,6 +29,7 @@ class BaseParquetDataset(data.Dataset):
         self.local_parquet_list = None
         self.local_parquet_length = 0
         self.local_parquet_data = []  # Dataset columns to pylist
+        self.local_parquet_batche = [].__iter__()
 
     def total_length(self):
         pfs = pq.ParquetDataset(self.parquet_list)
@@ -37,6 +38,8 @@ class BaseParquetDataset(data.Dataset):
 
     def fetch_local_parquet_list(self):
         info = data.get_worker_info()
+        if info is None:
+            return
         amount = round(len(self.parquet_list) / info.num_workers)
         amount = int(amount)
         start = info.id * amount
@@ -53,24 +56,29 @@ class BaseParquetDataset(data.Dataset):
         if next >= self.local_parquet_length:
             next = 0
             self.local_parquet_index = 0
-
-        table = pq.read_table(
-            self.local_parquet_list[next], columns=self.use_column).to_pylist()
+        file = pq.ParquetFile(self.local_parquet_list[next])
         self.local_parquet_index += 1
-        return table
+
+        batches = file.iter_batches(batch_size=32, use_threads=False)
+
+        return batches
 
     def __len__(self):
         return self.total_length()
 
     def __getitem__(self, index) -> None:
         # check current file end
-        if len(self.local_parquet_data) <= 1:
+        if len(self.local_parquet_data) == 0:
             # if we use all parquet data in current cache
-            if self.local_parquet_index > self.local_parquet_length:
-                self.local_parquet_index = 0
             if self.local_parquet_list is None:
                 self.local_parquet_list = self.fetch_local_parquet_list()
 
-            self.local_parquet_data = self.load_parquet()
-
+            batch = next(self.local_parquet_batche, None)
+            if batch is None:
+                self.local_parquet_batche = self.load_parquet()
+                batch = next(self.local_parquet_batche, None)
+            self.index = batch.column('name').to_pylist()
+            batch = batch.column('image').to_pylist()
+            self.local_parquet_data = batch
+        print(self.index.pop())
         return self.local_parquet_data.pop()

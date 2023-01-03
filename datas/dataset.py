@@ -74,6 +74,6 @@ class CycleDepthDataset(BaseParquetDataset):
         i0 = super().__getitem__(index)
         i1 = super().__getitem__(index)
 
-        r0 = self.decode_image(i0['image'])
-        r1 = self.decode_image(i1['image'])
+        r0 = self.decode_image(i0)
+        r1 = self.decode_image(i1)
         return self.preprocess([r0, r1]), self.k_mat, self.k_mat_inv
