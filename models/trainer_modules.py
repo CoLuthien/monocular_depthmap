@@ -18,6 +18,7 @@ from models.encoder_blocks import *
 from models.decoder_blocks import *
 from models.reference_layers import *
 from losses.image import *
+from functools import reduce
 
 
 class Model(pl.LightningModule):
@@ -36,6 +37,7 @@ class Model(pl.LightningModule):
         # in -> N x 3 x W x H -> N x 3 x W x H
 
         self.bce = nn.BCEWithLogitsLoss()
+        self.l1 = nn.L1Loss()
         self.projection_loss = ReprojectionLoss()
         self.smooth_loss = SmoothingLoss()
 
@@ -69,42 +71,59 @@ class Model(pl.LightningModule):
         results = self(batch)
 
         pixels = results['pixel_sample']
+        pixs =[]
+        projected_depth = []
+        for p in pixels:
+            pix, z = torch.split(p, [2, 1], dim=3)
+            pixs.append(pix)
+            projected_depth.append(z)
+        depth = results['depth']
         sampled_images = [F.grid_sample(img, pixel)
-                          for img, pixel in zip(imgs, pixels)]
+                          for img, pixel in zip(imgs, pixs)]
 
-        losses = [self.projection_loss(pred, imgs[0])
-                  for pred in sampled_images]
+        losses = [self.projection_loss(pred, ref)
+                  for pred, ref in zip(sampled_images, imgs)]
+        bce_losses = [self.bce(pred, ref)
+                      for pred, ref in zip(sampled_images, imgs)]
+        depth_loss = [self.l1(proj, pred)
+                      for proj, pred in zip(projected_depth, depth)]
 
         smooth_loss = []
         disps = results['disp']
         for disp, target in zip(disps, imgs):
-            mean = disp.mean(2, True).mean(3, True)
+            mean = disp.mean(dim=2, keepdim=True).mean(dim=3, keepdim=True)
             norm = disp / (mean + 1e-7)
             smooth_loss.append(self.smooth_loss(norm, target))
 
-        losses = losses + smooth_loss
+        losses = losses
 
-        loss = torch.empty_like(losses[0])
+        loss = reduce(lambda acc, value: acc + value.mean(), losses, 0)
+        loss += reduce(lambda acc, value: acc + value.mean(), bce_losses, 0)
+        loss += reduce(lambda acc, value: acc + value.mean(), depth_loss, 0) * 1e-4
+        loss += reduce(lambda acc, value: acc +
+                       value.mean(), smooth_loss, 0) * 1e-3
 
-        for l in losses:
-            loss += l
         idx = (batch_idx) * (self.current_epoch + 1)
         if (idx % 100 == 0):
             tb = self.logger.experiment
             self.logger.experiment.add_image("reference",
-                                             imgs[0],
+                                             torch.cat(imgs, dim=2),
                                              idx,
                                              dataformats="NCHW")
             self.logger.experiment.add_image("disp",
-                                             disps[0],
+                                             torch.cat(disps, dim=2),
                                              idx,
                                              dataformats="NCHW")
             self.logger.experiment.add_image("sampled",
-                                             sampled_images[0],
+                                             torch.cat(sampled_images, dim=2),
+                                             idx,
+                                             dataformats="NCHW")
+            self.logger.experiment.add_image("depth",
+                                             torch.cat(depth, dim=2),
                                              idx,
                                              dataformats="NCHW")
 
-        return l
+        return loss
 
     def configure_optimizers(self) -> Any:
         optim = torch.optim.Adamax(self.parameters(), lr=1e-4)

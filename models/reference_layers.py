@@ -54,7 +54,7 @@ class BackprojectDepth(nn.Module):
         output : N x 3 x W * H
         """
         n, c, w, h = depth.size()
-        cam_points = torch.matmul(inv_K[:, :3, :3], self.pix_coords[:n, ...])
+        cam_points = torch.matmul(inv_K[:n, :3, :3], self.pix_coords[:n, ...])
         cam_points = depth.view(n, 1, -1) * cam_points
         cam_points = torch.cat([cam_points, self.ones[:n, ...]], dim=1)
 
@@ -76,6 +76,7 @@ class Disp2Depth(nn.Module):
             torch.Tensor([1. / min_]), requires_grad=False)
 
     def forward(self, disp: torch.Tensor) -> torch.Tensor:
+        disp = disp.clamp(0, 1)
         scaled_disp = self.min_disp + (self.max_disp - self.min_disp) * disp
         depth = 1. / scaled_disp
         return depth
@@ -90,11 +91,12 @@ class Project3D(nn.Module):
         super(Project3D, self).__init__()
         self.batch_size = batch_size
         self.width = width
+        self.coef = 1 / (width // 2 - 1)
         self.eps = eps
 
     def forward(self, points: torch.Tensor, K: torch.Tensor, T: torch.Tensor):
         """
-        points: B x 3 x W * W
+        points: B x 4 x W * W
         K : B x 4 x 4
         T : B x 4 x 4
         """
@@ -104,16 +106,11 @@ class Project3D(nn.Module):
         P = torch.matmul(K, T)
         cam_points = torch.matmul(P, points)
 
-        vector = cam_points[:, :3, ...] / \
-            (cam_points[:, 3, ...].unsqueeze(1) + self.eps)
-
-        pix_coords = vector[:, :2, :] / vector[:, 2, ...]
-
+        pix_coords = cam_points[:, :3, ...]
         pix_coords = pix_coords.view(
-            n, 2, self.width, self.width)
+            n, 3, self.width, self.width)
         pix_coords = pix_coords.permute(0, 2, 3, 1)
-        coef = 1 / (self.width - 1)
-        pix_coords[..., 0] *= coef
-        pix_coords[..., 1] *= coef
-        # pix_coords = pix_coords * 2 - 1
+
+        pix_coords *= self.coef
+
         return pix_coords

@@ -77,8 +77,7 @@ class BaseParquetDataset(data.Dataset):
             if batch is None:
                 self.local_parquet_batche = self.load_parquet()
                 batch = next(self.local_parquet_batche, None)
-            self.index = batch.column('name').to_pylist()
             batch = batch.column('image').to_pylist()
             self.local_parquet_data = batch
-        print(self.index.pop())
-        return self.local_parquet_data.pop()
+
+        return self.local_parquet_data.pop(0)

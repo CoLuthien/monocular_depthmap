@@ -23,23 +23,23 @@ class EncoderBlock(nn.Module):
         super().__init__()
         # input (N, 3, W, H)
         self.e0 = nn.Sequential(*[
-            ConvBlock(img_chan, dim, 3, 2, 1),  # maintain
+            ConvBlock(img_chan, dim, 4, 2, 1),  # maintain
             ResBlock(dim),
         ])
         self.e1 = nn.Sequential(*[
-            ConvBlock(dim, dim * 2, 3, 2, 1),  # /2
+            ConvBlock(dim, dim * 2, 4, 2, 1),  # /2
             ResBlock(dim * 2),
         ])
         self.e2 = nn.Sequential(*[
-            ConvBlock(dim * 2, dim * 4, 3, 2, 1),  # /4
+            ConvBlock(dim * 2, dim * 4, 4, 2, 1),  # /4
             ResBlock(dim * 4),
         ])
         self.e3 = nn.Sequential(*[
-            ConvBlock(dim * 4, dim * 8, 3, 2, 1),  # / 2
+            ConvBlock(dim * 4, dim * 8, 4, 2, 1),  # / 2
             ResBlock(dim * 8),
         ])
         self.e4 = nn.Sequential(*[
-            ConvBlock(dim * 8, dim * 16, 3, 2, 1),
+            ConvBlock(dim * 8, dim * 16, 4, 2, 1),
             ResBlock(dim * 16)
         ])
 
