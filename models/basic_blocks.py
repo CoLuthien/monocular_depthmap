@@ -26,7 +26,7 @@ class ConvBlock(nn.Module):
                 in_channel, out_channel,
                 kernel_size=kernel_size, stride=stride,
                 padding=padding, groups=groups, bias=False),
-            nn.GroupNorm(1, out_channel)  # Equivalent to LayerNorm
+            nn.BatchNorm2d(out_channel)
         ]
         if (activation):
             layer += [nn.PReLU(out_channel, 0.2)]

@@ -31,7 +31,7 @@ default_attr = ImageAttributes(
     256,
     256, 2, [0, 1, -1], [0.8, 1.2], [0.8, 1.2], [.8, 1.2], [-.1, .1],
     torch.from_numpy(np.array([[1, 0, 0.5, 0],
-                               [0, 1., 0.5, 0],
+                               [0, 1., 0.6, 0],
                                [0, 0, 1, 0],
                                [0, 0, 0, 1]], dtype=np.float32)))
 
@@ -59,7 +59,7 @@ class CycleDepthDataset(BaseParquetDataset):
         images in this item. This ensures that all images input to the pose network receive the
         same augmentation.
         """
-        #output = map(lambda img: self.adjust(img), inputs)
+        # output = map(lambda img: self.adjust(img), inputs)
         output = map(lambda img: F.to_tensor(img), inputs)
 
         return list(output)
@@ -74,6 +74,6 @@ class CycleDepthDataset(BaseParquetDataset):
         i0 = super().__getitem__(index)
         i1 = super().__getitem__(index)
 
-        r0 = self.decode_image(i0['image'])
-        r1 = self.decode_image(i1['image'])
+        r0 = self.decode_image(i0)
+        r1 = self.decode_image(i1)
         return self.preprocess([r0, r1]), self.k_mat, self.k_mat_inv

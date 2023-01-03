@@ -18,7 +18,7 @@ class DepthDecoder(nn.Module):
         self.d0 = nn.Sequential(*[
             nn.PixelShuffle(2),
             ConvBlock(dim // 2, 1, 3, 1, 1),
-            nn.Sigmoid()
+            nn.Tanh()
         ])
         self.d1 = nn.Sequential(*[
             nn.PixelShuffle(2),
@@ -62,7 +62,7 @@ class PoseDecoder(nn.Module):
         super().__init__()
         squeezer = [
             nn.LazyConv2d(128, 1),
-            nn.Tanh()
+            nn.PReLU(1)
         ]
 
         convs = [
@@ -91,3 +91,35 @@ class PoseDecoder(nn.Module):
 
         out = self.linear(feature).view(b, 2, 4, 4)
         return out.split(1, dim=1)
+
+class CameraDecoder(nn.Module):
+    def __init__(self, in_features: int = 1) -> None:
+        super().__init__()
+        squeezer = [
+            nn.LazyConv2d(128, 1),
+            nn.PReLU(1)
+        ]
+
+        convs = [
+            ResBlock(256),
+            ResBlock(256),
+            nn.Conv2d(256, 1, 1, 1, 0),
+            nn.PReLU(1)
+        ]
+        linear = [nn.LazyLinear(16, bias=False)]
+
+        self.squeezer = nn.Sequential(*squeezer)
+        self.conv = nn.Sequential(*convs)
+        self.linear = nn.Sequential(*linear)
+        self.in_features = in_features
+
+    def forward(self, x: List[torch.Tensor]) -> torch.Tensor:
+        squeeze = list(map(lambda f: self.squeezer(f), x))
+
+        feature = torch.cat(squeeze, dim=1)
+        b, c, _, _ = feature.size()
+
+        feature = self.conv(feature).flatten(2, 3)
+
+        out = self.linear(feature).view(b, 4, 4)
+        return out
