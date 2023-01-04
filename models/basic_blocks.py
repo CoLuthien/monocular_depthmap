@@ -42,6 +42,7 @@ class ResBlock(nn.Module):
         layer = [
             ConvBlock(in_channel, in_channel, 3, 1, 1, activation=True),
             ConvBlock(in_channel, in_channel, 3, 1, 1, activation=False),
+            nn.BatchNorm2d(in_channel)
         ]
         self.block = nn.Sequential(*layer)
         self.activation = nn.PReLU(in_channel)

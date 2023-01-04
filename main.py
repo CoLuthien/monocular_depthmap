@@ -60,8 +60,8 @@ if __name__ == '__main__':
 
     # a = CycleDepthDataset('./', ['name'], ['image'])
 
-    dataset = CycleDepthDataset('./', ['index'], ['image'])
-    loader = data.DataLoader(dataset, batch_size=2, num_workers=2)
+    dataset = CycleDepthDataset('E:/parquetized_fish', ['index'], ['image'])
+    loader = data.DataLoader(dataset, batch_size=4, num_workers=4)
     device = torch.device('cuda:0')
     trainer = pl.Trainer(accelerator='gpu', devices=1, logger=TensorBoardLogger('./'))
     model = Model()

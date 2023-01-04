@@ -68,13 +68,13 @@ class PoseDecoder(nn.Module):
         convs = [
             ResBlock(256),
             ResBlock(256),
-            nn.Conv2d(256, 2, 1, 1, 0),
+            nn.Conv2d(256, 2, 3, 1, 1),
             nn.PReLU(2)
         ]
         linear = [
-            nn.LazyLinear(128),
-            nn.LeakyReLU(inplace=True),
-            nn.LazyLinear(16, bias=False)]
+            nn.LazyLinear(128, bias=True),
+            nn.LazyLinear(16)
+        ]
 
         self.squeezer = nn.Sequential(*squeezer)
         self.conv = nn.Sequential(*convs)

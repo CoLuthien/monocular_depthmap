@@ -25,17 +25,25 @@ class EncoderBlock(nn.Module):
         self.e0 = nn.Sequential(*[
             ConvBlock(img_chan, dim, 4, 2, 1),  # maintain
             ResBlock(dim),
+            ConvBlock(dim, dim, 3, 1, 1),
+            ResBlock(dim),
         ])
         self.e1 = nn.Sequential(*[
             ConvBlock(dim, dim * 2, 4, 2, 1),  # /2
+            ResBlock(dim * 2),
+            ConvBlock(dim * 2, dim * 2, 3, 1, 1),  # /2
             ResBlock(dim * 2),
         ])
         self.e2 = nn.Sequential(*[
             ConvBlock(dim * 2, dim * 4, 4, 2, 1),  # /4
             ResBlock(dim * 4),
+            ConvBlock(dim * 4, dim * 4, 3, 1, 1),  # /4
+            ResBlock(dim * 4),
         ])
         self.e3 = nn.Sequential(*[
             ConvBlock(dim * 4, dim * 8, 4, 2, 1),  # / 2
+            ResBlock(dim * 8),
+            ConvBlock(dim * 8, dim * 8, 3, 1, 1),  # / 2
             ResBlock(dim * 8),
         ])
         self.e4 = nn.Sequential(*[
@@ -69,5 +77,3 @@ class ImageDecoder(nn.Module):
 
     def forward(self, x: torch.Tensor, pose: torch.Tensor):
         return self.block(x)
-
-
