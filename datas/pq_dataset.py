@@ -5,9 +5,13 @@ from typing import Callable, List, Tuple, Union
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+from pyarrow import dataset as pas
 import pyarrow.parquet as pq
+import pyarrow
 from pathlib import Path
 from torch.utils import data
+
+from functools import reduce
 
 
 class BaseParquetDataset(data.Dataset):
@@ -18,9 +22,15 @@ class BaseParquetDataset(data.Dataset):
                  num_cache: int = 1,
                  ):
         super().__init__()
+        # self.parquet_list = [i.absolute()
+        # for i in Path(parquet_path).glob('*.parquet')]
+        self.parquet_paths = [
+            i for i in Path(parquet_path).iterdir() if i.is_dir()
+        ]
+        self.parquet_list = [
+            pas.dataset(path) for path in self.parquet_paths
+        ]
         self.idx_col = idx_column
-        self.parquet_list = [i.absolute()
-                             for i in Path(parquet_path).glob('*.parquet')]
         self.local_cache_index = 0  # index for current cache
         self.num_cache = num_cache
         self.use_column = use_column
@@ -32,22 +42,28 @@ class BaseParquetDataset(data.Dataset):
         self.local_parquet_batche = [].__iter__()
 
     def total_length(self):
-        pfs = pq.ParquetDataset(self.parquet_list)
-        idx_col = pfs.read(self.idx_col)
-        return len(idx_col)
+        length = [i.count_rows(columns=['name']) for i in self.parquet_list]
+        length = reduce(lambda x, y: x + y, length, 0)
+        return length
 
-    def fetch_local_parquet_list(self):
+    def fetch_local_parquet_list(self) -> List[pas.Dataset]:
         info = data.get_worker_info()
         if info is None:
             return
-        amount = round(len(self.parquet_list) / info.num_workers)
-        amount = int(amount)
-        start = info.id * amount
+        total = len(self.parquet_list)
+        amount = total // info.num_workers
+        left = total - amount * info.num_workers
+
+        offset = 0 if (left // (info.id + 1)) == 0 else left
+
+        start = info.id * amount + offset
         end = start + amount
+        assert start < len(self.parquet_list)
         if end > len(self.parquet_list):
             end = len(self.parquet_list)
 
-        item = self.parquet_list[start:end]
+        item = self.parquet_paths[start:end]
+        print(start, end)
         self.local_parquet_length = len(item)
         return item
 
@@ -56,10 +72,12 @@ class BaseParquetDataset(data.Dataset):
         if next >= self.local_parquet_length:
             next = 0
             self.local_parquet_index = 0
-        file = pq.ParquetFile(self.local_parquet_list[next])
+        path = self.local_parquet_list[next]
+        dset = pas.dataset(path)
         self.local_parquet_index += 1
 
-        batches = file.iter_batches(batch_size=32, use_threads=False)
+        batches = dset.to_batches(
+            fragment_readahead=2, batch_size=8, batch_readahead=8)
 
         return batches
 
@@ -68,7 +86,7 @@ class BaseParquetDataset(data.Dataset):
 
     def __getitem__(self, index) -> None:
         # check current file end
-        if len(self.local_parquet_data) == 0:
+        if len(self.local_parquet_data) <= 3:
             # if we use all parquet data in current cache
             if self.local_parquet_list is None:
                 self.local_parquet_list = self.fetch_local_parquet_list()

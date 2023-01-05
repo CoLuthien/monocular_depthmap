@@ -55,7 +55,7 @@ class ReprojectionLoss(nn.Module):
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         l1_loss = self.l1_loss(pred, target)
         ssim_loss = self.ssim(pred, target)
-        reprojection_loss = 0.85 * ssim_loss + 0.15 * l1_loss
+        reprojection_loss = 0.6 * ssim_loss + 0.4 * l1_loss
         return reprojection_loss
 
 

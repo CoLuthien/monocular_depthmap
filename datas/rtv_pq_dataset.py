@@ -10,6 +10,7 @@ import io
 
 import random
 from PIL import Image
+import cv2 as cv
 from torchvision import transforms
 from torchvision.transforms import functional as F
 
@@ -82,6 +83,22 @@ class RTVParquetDataset(BaseParquetDataset):
             s = 2 ** i
             self.resize[i] = transforms.Resize((self.height // s, self.width // s),
                                                interpolation=self.interp)
+        self.mask = self.get_mask()
+        self.ellipse_mask = self.get_mask()
+
+    def get_mask(self):
+        mask = np.zeros((960, 960))
+        mask = cv.circle(mask, (480, 480), 480, (1), -1)
+        mask = Image.fromarray(np.uint8(mask))
+
+        return mask
+
+    def get_ellipse_mask(self):
+        mask = np.zeros((960, 960))
+        mask = cv.ellipse(mask, (480, 480), (480, 240), 0, 0, 360, (1), -1)
+        mask = Image.fromarray(np.uint8(mask))
+
+        return mask
 
     def preprocess(self, inputs: Dict, color_aug: Callable):
         """Resize colour images to the required scales and augment if required
@@ -127,9 +144,21 @@ class RTVParquetDataset(BaseParquetDataset):
             K[1, :] *= self.height // (2 ** scale)
 
             inv_K = K.inverse()
-
             inputs[("K", scale)] = K
             inputs[("inv_K", scale)] = inv_K
+            if self.mask is not None:
+                mask = self.resize[scale](self.mask)
+                mask = np.array(mask, dtype=np.float32)
+                mask = torch.from_numpy(mask)
+                mask = mask.unsqueeze(0)
+                inputs[("mask", scale)] = mask
+
+            if self.ellipse_mask is not None:
+                ellipse_mask = self.resize[scale](self.ellipse_mask)
+                ellipse_mask = np.array(ellipse_mask, dtype=np.float32)
+                ellipse_mask = torch.from_numpy(ellipse_mask)
+                ellipse_mask = ellipse_mask.unsqueeze(0)
+                inputs[("ellipse_mask", scale)] = ellipse_mask
 
         if do_color_aug:
             color_aug = transforms.ColorJitter.get_params(
