@@ -87,11 +87,10 @@ class GCN(nn.Module):
         self.dropout = dropout
 
     def forward(self, x, adj):
-        print(type(x))
         x = F.relu(self.gc1(x, adj))
         x = F.dropout(x, self.dropout, training=self.training)
         x = self.gc2(x, adj)
-        return F.log_softmax(x, dim=1)
+        return F.softmax(x, dim=1)
 
 class CRPBlock(nn.Module):
     def __init__(self, in_planes, out_planes, n_stages):
@@ -100,7 +99,7 @@ class CRPBlock(nn.Module):
             setattr(self, '{}_{}'.format(i + 1, 'pointwise'), Conv1x1(in_planes if (i == 0) else out_planes, out_planes, False))
         self.stride = 1
         self.n_stages = n_stages
-        self.maxpool = nn.MaxPool2d(kernel_size=5, stride=1, padding=2)
+        self.maxpool = nn.AvgPool2d(kernel_size=5, stride=1, padding=2)
 
     def forward(self, x):
         top = x
@@ -150,5 +149,5 @@ class Project(nn.Module):
         pix_coords = pix_coords.permute(0, 2, 3, 1)
         pix_coords[..., 0] /= self.width - 1
         pix_coords[..., 1] /= self.height - 1
-        pix_coords = (pix_coords - 0.5) * 2
+        pix_coords = pix_coords * 2 - 1
         return pix_coords

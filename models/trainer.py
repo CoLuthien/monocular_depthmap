@@ -9,6 +9,7 @@ from pytorch_lightning.callbacks.progress import TQDMProgressBar
 from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
 from torch import nn
 from torch.nn import functional as F
+from torchvision.transforms import functional as FT
 import torch.utils.data as data
 from torchmetrics import Accuracy
 from torchvision import transforms
@@ -23,20 +24,16 @@ from models.base.basic_blocks import *
 from functools import reduce
 
 
-frame_ids = [-1, 0, 1]
-
-
 class Model(pl.LightningModule):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, batch, height, width) -> None:
+        super().__init__()
 
         self.depth_encoder = DepthEncoder(18, False)
-
         self.depth_decoder = DepthDecoder(self.depth_encoder.num_ch_enc)
-        self.pose_encoder = PoseEncoder(18)
-        self.pose_decoder = PoseDecoder(self.pose_encoder.num_ch_enc)
 
-        self.batch = 4
+        self.pose_decoder = PoseDecoder()
+
+        self.batch = 1
         self.width = 256
         self.height = 256
 
@@ -46,63 +43,115 @@ class Model(pl.LightningModule):
         self.project = Project(self.batch,
                                self.height, self.width)
 
-    def make_pose(self, inputs, outputs):
-        pose_inputs = [inputs[('color_aug', i, 0)] for i in frame_ids]
-        pose_features = [
-            self.pose_encoder(torch.cat(pose_inputs[0:2:1], dim=1)),
-            self.pose_encoder(torch.cat(pose_inputs[1:3:1], dim=1))
-        ]
+    def predict_pose(self, feature: torch.Tensor, invert: bool) -> torch.Tensor:
+        angle, position = self.pose_decoder(feature)
 
-        pose_outputs = [
-            self.pose_decoder(torch.cat(feature), dim=1) for feature in pose_features
-        ]
+        return self.transformation_from_parameters(angle[:, 0], position[:, 0], invert)
 
-        for idx in [-1, 1]:
-            cur = pose_outputs.pop(0)
-            axis, translation = cur
-            outputs[('axisangle', 0, idx)] = axis
-            outputs[('translation', 0, idx)] = translation
-            outputs[('cam_T_cam', 0, idx)] = self.transformation_from_parameters(
-                axis, translation, idx < 0
-            )
+    def predict_cloud_and_rasterize(self, depth, kmat, kmat_inv, projection):
+        points_in_camera_volume = self.backproject(depth, kmat_inv)
+        rasterized_points = self.project(
+            points_in_camera_volume, kmat, projection)
+        return rasterized_points
 
-        return outputs
+    def sample_image(self, orig: torch.Tensor, sample_point: torch.Tensor) -> torch.Tensor:
+        sampled_image = F.grid_sample(
+            orig,
+            sample_point,
+            padding_mode='border'
+        )
+        return sampled_image
 
-    def forward(self, inputs):
-        depth_feat = self.depth_encoder(inputs[('color_aug', 0, 0)])
-        outputs = self.depth_decoder(depth_feat, 0)
-        outputs = self.make_pose(inputs, outputs)
+    def predict_disparity(self, feature: torch.Tensor) -> torch.Tensor:
+        disp = self.depth_decoder(feature, 0)
+        return disp
 
-        for i in range(4):
-            self.reproject_image(inputs, outputs, i)
+    def predict_all(self, imgs: List[torch.Tensor], K, Kinv):
+        prev_frame = imgs[0]
+        cur_frame = imgs[1]
+        next_frame = imgs[2]
 
-        return outputs
+        features = [self.depth_encoder(img) for img in imgs]
 
-    def disp_to_depth(self, disp, min_depth, max_depth):
-        min_disp = 1 / max_depth  # 0.01
-        max_disp = 1 / min_depth  # 10
-        scaled_disp = min_disp + (max_disp - min_disp) * \
-            disp  # (10-0.01)*disp+0.01
+        disp = self.predict_disparity(features[1])
+        depth = self.predict_depth(disp, 0.1, 100.)
+
+        prev_cur = torch.cat([features[0][-1], features[1][-1]], dim=1)
+        cur_next = torch.cat([features[1][-1], features[2][-1]], dim=1)
+        left_pose = self.predict_pose(prev_cur, True)
+        right_pose = self.predict_pose(cur_next, False)
+
+        pixel_left = self.predict_cloud_and_rasterize(
+            depth, K, Kinv, left_pose)
+
+        pixel_right = self.predict_cloud_and_rasterize(
+            depth, K, Kinv, right_pose)
+
+        sample_left = self.sample_image(prev_frame, pixel_left)
+        sample_right = self.sample_image(next_frame, pixel_right)
+
+        return sample_left, sample_right, disp, depth
+
+    def forward(self, batch: Tuple[List[torch.Tensor]]):
+        imgs, camera_info, camera_info_inv, _ = batch
+
+        return self.predict_all(imgs, camera_info, camera_info_inv)
+
+    def training_step(self, inputs, batch_idx):
+        imgs, _, _, mask = inputs
+        p_frame = imgs[0]
+        c_frame = imgs[1]
+        n_frame = imgs[2]
+        sample_left, sample_right, disp, depth = self(inputs)
+
+        left_loss = self.compute_reprojection_loss(sample_left, c_frame)
+        right_loss = self.compute_reprojection_loss(sample_right, c_frame)
+
+        ident_left_loss = self.compute_reprojection_loss(sample_left, p_frame)
+        ident_right_loss = self.compute_reprojection_loss(
+            sample_right, n_frame)
+
+        repr_loss = [left_loss, right_loss, ident_left_loss, ident_right_loss]
+        repr_loss = [l.masked_fill(mask, 0) for l in repr_loss]
+        repr_loss = torch.cat(repr_loss, dim=1)
+        repr_loss = repr_loss.mean()
+
+        disp = disp.masked_fill(mask, 0)
+        mean_disp = disp.mean(2, True).mean(3, True)
+        norm_disp = disp / (mean_disp + 1e-7)
+
+        smooth_loss = self.get_smooth_loss(
+            norm_disp, FT.rgb_to_grayscale(c_frame)) * 1e-4
+        smooth_loss = smooth_loss.mean()
+
+        depth_loss = self.get_smooth_loss(
+            depth, FT.rgb_to_grayscale(c_frame)) * 1e-4
+            
+        smooth_loss += depth_loss.mean()
+        step = (self.current_epoch + 1) * batch_idx
+        if step % 100 == 0:
+            depth = depth.masked_fill(mask, 0)
+            logger = self.logger.experiment
+            logger.add_image('left', sample_left, step, dataformats='NCHW')
+            logger.add_image('right', sample_right,
+                             step, dataformats='NCHW')
+            logger.add_image('disp', disp, step, dataformats='NCHW')
+            logger.add_image('depth', depth, step, dataformats='NCHW')
+            logger.add_image('ref', c_frame, step, dataformats='NCHW')
+
+        return repr_loss + smooth_loss.mean()
+
+    def predict_depth(self, disp, min_depth, max_depth):
+        min_disp = 1 / max_depth
+        max_disp = 1 / min_depth
+        scaled_disp = min_disp + (max_disp - min_disp) * disp
         depth = 1 / scaled_disp
-        return scaled_disp, depth
+        return depth
 
-    def reproject_image(self, inputs, outputs, scale):
-        disp = outputs[("disp", 0, scale)]
-        disp = F.interpolate(
-            disp, [self.height, self.width], mode="bilinear", align_corners=False)
-        _, depth = self.disp_to_depth(disp, 0.5, 30)
-
-        for i, frame_id in enumerate([-1, 1]):
-            T = outputs[("cam_T_cam", 0, frame_id)]
-            cam_points = self.backproject(depth, inputs[("inv_K")])
-            pix_coords = self.project(cam_points, inputs[("K")], T)
-            img = inputs[("color", frame_id, 0)]
-            outputs[("depth", frame_id, scale)] = depth
-            outputs[("color", frame_id, scale)] = F.grid_sample(
-                img,
-                pix_coords,
-                padding_mode="border")
-        return outputs
+    def gradient(self, D):
+        dy = D[:, :, 1:] - D[:, :, :-1]
+        dx = D[:, :, :, 1:] - D[:, :, :, :-1]
+        return dx, dy
 
     def get_translation_matrix(self, translation_vector):
         T = torch.zeros(translation_vector.shape[0], 4, 4).cuda()
@@ -162,77 +211,11 @@ class Model(pl.LightningModule):
         eps = 1e-3
         return torch.sqrt(torch.pow(target - pred, 2) + eps ** 2)
 
-    def compute_perceptional_loss(self, tgt_f, src_f):
-        loss = self.robust_l1(tgt_f, src_f).mean(1, True)
-        return loss
-
-    def compute_reprojection_loss(self, pred, target):
+    def compute_reprojection_loss(self, pred, target) -> torch.Tensor:
         photometric_loss = self.robust_l1(pred, target).mean(1, True)
         ssim_loss = self.ssim(pred, target).mean(1, True)
         reprojection_loss = (0.85 * ssim_loss + 0.15 * photometric_loss)
         return reprojection_loss
-
-    def training_step(self, inputs, batch_idx):
-        outputs = self(inputs)
-        loss_dict = torch.empty().cuda()
-        for scale in [0, 1, 2, 3]:
-            """
-            initialization
-            """
-            disp = outputs[("disp", 0, scale)]
-            target = inputs[("color", 0, 0)]
-
-            reprojection_losses = []
-
-            """
-            reconstruction
-            """
-            # print(outputs)
-            outputs = self.reproject_image(inputs, outputs, scale)
-            """
-            automask
-            """
-            for frame_id in [-1, 1]:
-                pred = inputs[("color", frame_id, 0)]
-                identity_reprojection_loss = self.compute_reprojection_loss(
-                    pred, target)
-                identity_reprojection_loss += torch.randn(
-                    identity_reprojection_loss.shape).cuda() * 1e-5
-                reprojection_losses.append(identity_reprojection_loss)
-
-            """
-            minimum reconstruction loss
-            """
-            for frame_id in [-1, 1]:
-                pred = outputs[("color", frame_id, scale)]
-                reprojection_losses.append(
-                    self.compute_reprojection_loss(pred, target))
-
-            min_reconstruct_loss, outputs[("min_index", scale)] = torch.min(
-                reprojection_loss, dim=1)
-
-            """
-            disp mean normalization
-            """
-            mean_disp = disp.mean(2, True).mean(3, True)
-            disp = disp / (mean_disp + 1e-7)
-
-            """
-            smooth loss
-            """
-            smooth_loss = self.get_smooth_loss(disp, target)
-
-            smooth_loss = self.opt.smoothness_weight * \
-                smooth_loss / (2 ** scale)/len(self.opt.scales)
-            reprojection_loss = torch.cat(reprojection_losses, 1)
-            reconstruction_loss = min_reconstruct_loss.mean()/len(self.opt.scales)
-
-            loss_dict += (smooth_loss + reprojection_loss +
-                          reconstruction_loss)
-
-        idx = (batch_idx) * (self.current_epoch + 1)
-
-        return loss_dict
 
     def get_smooth_loss(self, disp, img):
         b, _, h, w = disp.size()
@@ -259,8 +242,13 @@ class Model(pl.LightningModule):
             torch.mean(disp_dyy.abs() * torch.exp(-a2 *
                        img_dyy.abs().mean(1, True)))
 
-        return smooth1+smooth2
+        return (smooth1+smooth2)
 
     def configure_optimizers(self) -> Any:
-        optim = torch.optim.Adamax(self.parameters(), lr=1e-4)
+        #optim = torch.optim.Rprop(self.parameters(), lr=1e-4)
+        #optim = torch.optim.RMSprop(self.parameters(), lr=1e-4)
+        #optim = torch.optim.Adadelta(self.parameters(), lr=1e-4)
+        #optim = torch.optim.Adamax(self.parameters(), lr=1e-4)
+        #optim = torch.optim.Adagrad(self.parameters(), lr=1e-4)
+        optim = torch.optim.AdamW(self.parameters(), lr=1e-4)
         return optim

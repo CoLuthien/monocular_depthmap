@@ -4,7 +4,6 @@ import numpy as np
 import pyarrow as pa
 import cv2 as cv
 
-from datas.dataset import CycleDepthDataset
 from datas.rtv_pq_dataset import *
 from torch.utils import data
 
@@ -21,6 +20,7 @@ import torch.nn.functional as F
 import argparse
 
 from PIL import Image
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -40,11 +40,12 @@ def parse_args():
 if __name__ == '__main__':
 
     # a = CycleDepthDataset('./', ['name'], ['image'])
-
-    dataset = RTVParquetDataset('E:/parquets', ['index'], ['image'], 4)
-    loader = data.DataLoader(dataset, batch_size=1, num_workers=4)
+    torch.set_default_dtype(torch.float32)
+    dataset = RTVParquetDataset('E:/parquets', ['index'], ['image'], 1)
+    loader = data.DataLoader(dataset, batch_size=1,
+                             num_workers=6, shuffle=True, drop_last=True)
     device = torch.device('cuda:0')
-    trainer = pl.Trainer(accelerator='gpu', devices=1, logger=TensorBoardLogger('./'))
-    model = Model()
+    trainer = pl.Trainer(accelerator='gpu', devices=1,
+                         logger=TensorBoardLogger('./'))
+    model = Model(1, 256, 256)
     trainer.fit(model, loader)
-

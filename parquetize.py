@@ -1,9 +1,6 @@
 
 from pathlib import Path
 
-from parquetize_options import ParquetizeOption
-
-from multiprocessing import Pool
 
 import pyarrow as pa
 from pyarrow import parquet as pq
@@ -34,7 +31,6 @@ def make_name(path: Path):
 
 
 if __name__ == "__main__":
-    pool = Pool(8)
     datas = Path("E:/rtv_fisheye/rtv_fisheye/Original")
     scenes = [i for i in datas.iterdir()]
     idx = 0
