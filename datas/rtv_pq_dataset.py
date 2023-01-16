@@ -3,6 +3,7 @@ from typing import Callable, List, Tuple, Union, Dict, Callable
 from dataclasses import dataclass
 
 import torch
+import random
 from .pq_dataset import BaseParquetDataset
 
 import numpy as np
@@ -68,6 +69,22 @@ class RTVParquetDataset(BaseParquetDataset):
             self.create_circular_mask(self.height, self.width)
         )
 
+    def augment(self, img: torch.Tensor, aug: Tuple, angle: float):
+        fn_idx, brightness_factor, contrast_factor, saturation_factor, hue_factor = aug
+
+        for fn_id in fn_idx:
+            if fn_id == 0 and brightness_factor is not None:
+                img = F.adjust_brightness(img, brightness_factor)
+            elif fn_id == 1 and contrast_factor is not None:
+                img = F.adjust_contrast(img, contrast_factor)
+            elif fn_id == 2 and saturation_factor is not None:
+                img = F.adjust_saturation(img, saturation_factor)
+            elif fn_id == 3 and hue_factor is not None:
+                img = F.adjust_hue(img, hue_factor)
+
+        img = F.rotate(img, angle)
+        return img
+
     def create_circular_mask(self, h, w, center=None, radius=None):
 
         if center is None:  # use the middle of the image
@@ -89,6 +106,20 @@ class RTVParquetDataset(BaseParquetDataset):
         imgs = [super(__class__, self).__getitem__(idx)
                 for idx in self.frame_idxs]
         imgs = [self.decode_image(img) for img in imgs]
+
+        #def rand_angle(x): return (random.random() * 2 - 1) * x
+
+        #if random.random() > 0.5:
+            #aug = transforms.ColorJitter.get_params(
+                #self.brightness, self.contrast, self.saturation, self.hue)
+            #base = rand_angle(180)
+            #diff = rand_angle(10)
+            #angles = [base - diff, base, base + diff]
+
+            #imgs = [F.equalize(img) for img in imgs]
+            #imgs = [self.augment(img, aug, angle)
+                    #for img, angle in zip(imgs, angles)]
+
         imgs = [F.to_tensor(img) for img in imgs]
 
         return imgs, self.kmat, self.kmat_inv, self.mask

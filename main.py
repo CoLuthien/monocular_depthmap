@@ -36,7 +36,6 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-
 if __name__ == '__main__':
 
     # a = CycleDepthDataset('./', ['name'], ['image'])
@@ -46,6 +45,10 @@ if __name__ == '__main__':
                              num_workers=6, shuffle=True, drop_last=True)
     device = torch.device('cuda:0')
     trainer = pl.Trainer(accelerator='gpu', devices=1,
-                         logger=TensorBoardLogger('./'))
+                         logger=TensorBoardLogger('./'),
+                         default_root_dir=Path('E:/models/'),
+                         max_epochs=50,
+                         min_epochs=40
+                         )
     model = Model(1, 256, 256)
     trainer.fit(model, loader)

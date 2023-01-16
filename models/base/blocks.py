@@ -13,51 +13,18 @@ from torch.nn.modules.module import Module
 import scipy.sparse as sp
 
 
-class ConvBlock(nn.Module):
-    def __init__(
-        self,
-        inp: int,
-        outp: int,
-        k: int,
-        s: int = 1,
-        p: int = 0,
-        g: int = 1,
-        act: bool = True,
-    ) -> None:
-        super().__init__()
-        layer = [
-            nn.Conv2d(
-                inp,
-                outp,
-                k,
-                s,
-                p,
-                groups=g,
-                padding_mode="reflect",
-                bias=False,
-            ),
-        ]
-        layer += [nn.GroupNorm(1, outp)]  # layernorm
-        if act:
-            layer += [nn.LeakyReLU(0.2, inplace=True)]
-        self.block = nn.Sequential(*layer)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.block(x)
-        return x
-
-
 class GraphConv(Module):
-    def __init__(self, in_features, n_channel, bias=True):
+    def __init__(self, inp, outp, bias=True):
         super(GraphConv, self).__init__()
-        self.in_features = in_features
-        self.out_features = n_channel
-        self.weight = nn.Linear(in_features, n_channel)
+        self.in_features = inp
+        self.out_features = outp
+        self.weight = nn.Linear(inp, outp)
 
     def forward(self, channel_conn, img_feature):
         # feature * weight
         support = self.weight(img_feature)
-        output = torch.matmul(channel_conn, support)
+        print(channel_conn.size(), support.size())
+        output = channel_conn @ support
 
         return output
 
@@ -87,9 +54,9 @@ class SpatialPyramidPooling(nn.Module):
         return out
 
 
-class ResBlock(nn.Module):
+class ResNetBlock(nn.Module):
     def __init__(self, in_channels):
-        super(ResBlock, self).__init__()
+        super(ResNetBlock, self).__init__()
         self.conv1 = nn.Conv2d(
             in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(in_channels)
@@ -115,12 +82,16 @@ class AdjacencyMatrix(nn.Module):
     def __init__(self):
         super(AdjacencyMatrix, self).__init__()
 
-    def forward(self, patch_features):
+    def forward(self, patch_features: torch.Tensor) -> torch.Tensor:
+        """
+        input: b x c x f, 3d tensor
+        output: b x c x c 3d tensor
+        """
         patch_features = F.normalize(patch_features)
         norm = patch_features.norm()
 
         dot = patch_features @ patch_features.transpose(1, 2)
         b, c, r = dot.size()
         dot /= norm
-        dot = dot + torch.eye(c)
+        dot = dot + torch.eye(c).to(norm.device)
         return dot

@@ -27,13 +27,17 @@ class DepthEncoder(nn.Module):
                    50: models.resnet50,
                    101: models.resnet101,
                    152: models.resnet152}
+        resnets_weights = {18:  models.ResNet18_Weights,
+                           34:  models.ResNet34_Weights,
+                           50:  models.ResNet50_Weights,
+                           101: models.ResNet101_Weights,
+                           152: models.ResNet152_Weights,}
 
         if num_layers not in resnets:
             raise ValueError(
                 "{} is not a valid number of resnet layers".format(num_layers))
 
-        self.encoder = resnets[num_layers](pretrained)
-
+        self.encoder = resnets[num_layers](pretrained, resnets_weights[num_layers].DEFAULT)
         if num_layers > 34:
             self.num_ch_enc[1:] *= 4
 
@@ -53,4 +57,3 @@ class DepthEncoder(nn.Module):
         features.append(self.encoder.layer4(features[-1]))
 
         return features
-

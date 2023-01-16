@@ -15,20 +15,72 @@ import scipy.sparse as sp
 class Conv1x1(nn.Module):
     def __init__(self, in_channels, out_channels, bias=False):
         super(Conv1x1, self).__init__()
-        self.conv = nn.Conv2d(int(in_channels), int(out_channels), kernel_size=1, stride=1, bias=bias)
+        self.conv = nn.Conv2d(int(in_channels), int(
+            out_channels), kernel_size=1, stride=1, bias=bias)
+
     def forward(self, x):
         out = self.conv(x)
         return out
 
 
+class ResBlock(nn.Module):
+    def __init__(self, channel: int) -> None:
+        super().__init__()
+        blocks = [
+            nn.Conv2d(channel, channel, 3, 1, 1, bias=False),
+            nn.LeakyReLU(0.1),
+            nn.GroupNorm(1, channel),
+            nn.Conv2d(channel, channel, 1, bias=False)
+        ]
+
+        self.blocks = nn.Sequential(*blocks)
+        self.act = nn.LeakyReLU(0.1)
+
+    def forward(self, x: torch.Tensor):
+        out = self.blocks(x)
+
+        return self.act(out + x)
+
+class ConvBlock(nn.Module):
+    def __init__(
+        self,
+        inp: int,
+        outp: int,
+        k: int,
+        s: int = 1,
+        p: int = 0,
+        g: int = 1,
+        act: bool = True,
+    ) -> None:
+        super().__init__()
+        layer = [
+            nn.Conv2d(
+                inp,
+                outp,
+                k,
+                s,
+                p,
+                groups=g,
+                padding_mode="reflect",
+                bias=False,
+            ),
+        ]
+        layer += [nn.GroupNorm(1, outp)]  # layernorm
+        if act:
+            layer += [nn.PReLU(outp)]
+        self.block = nn.Sequential(*layer)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.block(x)
+        return x
+
+
 class Conv3x3(nn.Module):
     def __init__(self, in_channels, out_channels, use_refl=True):
         super(Conv3x3, self).__init__()
-        if use_refl:
-            self.pad = nn.ReflectionPad2d(1)
-        else:
-            self.pad = nn.ZeroPad2d(1)
+        self.pad = nn.ZeroPad2d(1)
         self.conv = nn.Conv2d(int(in_channels), int(out_channels), 3)
+
     def forward(self, x):
         out = self.pad(x)
         out = self.conv(out)
@@ -43,10 +95,12 @@ class Conv5x5(nn.Module):
         else:
             self.pad = nn.ZeroPad2d(2)
         self.conv = nn.Conv2d(int(in_channels), int(out_channels), 5)
+
     def forward(self, x):
         out = self.pad(x)
         out = self.conv(out)
         return out
+
 
 class GraphConvolution(Module):
     """
@@ -72,11 +126,12 @@ class GraphConvolution(Module):
 
     def forward(self, input, adj):
         support = torch.mm(input, self.weight)
-        output = torch.spmm(adj, support)
+        output = torch.matmul(adj, support)
         if self.bias is not None:
             return output + self.bias
         else:
             return output
+
 
 class GCN(nn.Module):
     def __init__(self, nfeat, nhid, nclass, nclassa, dropout):
@@ -92,11 +147,13 @@ class GCN(nn.Module):
         x = self.gc2(x, adj)
         return F.softmax(x, dim=1)
 
+
 class CRPBlock(nn.Module):
     def __init__(self, in_planes, out_planes, n_stages):
         super(CRPBlock, self).__init__()
         for i in range(n_stages):
-            setattr(self, '{}_{}'.format(i + 1, 'pointwise'), Conv1x1(in_planes if (i == 0) else out_planes, out_planes, False))
+            setattr(self, '{}_{}'.format(i + 1, 'pointwise'),
+                    Conv1x1(in_planes if (i == 0) else out_planes, out_planes, False))
         self.stride = 1
         self.n_stages = n_stages
         self.maxpool = nn.AvgPool2d(kernel_size=5, stride=1, padding=2)
@@ -109,6 +166,7 @@ class CRPBlock(nn.Module):
             x = top + x
         return x
 
+
 class Backproject(nn.Module):
     def __init__(self, batch_size, height, width):
         super(Backproject, self).__init__()
@@ -117,18 +175,20 @@ class Backproject(nn.Module):
         self.height = height
         self.width = width
 
-        meshgrid = np.meshgrid(range(self.width), range(self.height), indexing='xy')
+        meshgrid = np.meshgrid(
+            range(self.width), range(self.height), indexing='xy')
         self.id_coords = np.stack(meshgrid, axis=0).astype(np.float32)
         self.id_coords = torch.from_numpy(self.id_coords)
         self.ones = torch.ones(self.batch_size, 1, self.height * self.width)
-        self.pix_coords = torch.unsqueeze(torch.stack([self.id_coords[0].view(-1), self.id_coords[1].view(-1)], 0), 0)
+        self.pix_coords = torch.unsqueeze(torch.stack(
+            [self.id_coords[0].view(-1), self.id_coords[1].view(-1)], 0), 0)
         self.pix_coords = self.pix_coords.repeat(batch_size, 1, 1)
         self.pix_coords = torch.cat([self.pix_coords, self.ones], 1)
 
-    def forward(self, depth, inv_K):
-        cam_points = torch.matmul(inv_K[:, :3, :3], self.pix_coords.cuda())
+    def forward(self, depth: torch.Tensor, inv_K) -> torch.Tensor:
+        cam_points = torch.matmul(inv_K[:, :3, :3], self.pix_coords.to(device=depth.device))
         cam_points = depth.view(self.batch_size, 1, -1) * cam_points
-        cam_points = torch.cat([cam_points, self.ones.cuda()], 1)
+        cam_points = torch.cat([cam_points, self.ones.to(device=depth.device)], dim=1)
         return cam_points
 
 
@@ -142,12 +202,17 @@ class Project(nn.Module):
         self.eps = eps
 
     def forward(self, points, K, T):
-        P = torch.matmul(K, T)[:, :3, :]
+        P = torch.matmul(K, T)
         cam_points = torch.matmul(P, points)
-        pix_coords = cam_points[:, :2, :] / (cam_points[:, 2, :].unsqueeze(1) + self.eps)
-        pix_coords = pix_coords.view(self.batch_size, 2, self.height, self.width)
+        pix_coords = cam_points[:, :2, :] / \
+            (cam_points[:, 3, :].unsqueeze(1) + self.eps)
+        pix_coords = cam_points[:, :2, :]
+        pix_coords = pix_coords.view(
+            self.batch_size, 2, self.height, self.width)
         pix_coords = pix_coords.permute(0, 2, 3, 1)
-        pix_coords[..., 0] /= self.width - 1
-        pix_coords[..., 1] /= self.height - 1
-        pix_coords = pix_coords * 2 - 1
-        return pix_coords
+
+        coef = 1 / 127
+        pix_coords[..., 0] *= coef
+        pix_coords[..., 1] *= coef
+
+        return F.tanh(pix_coords)

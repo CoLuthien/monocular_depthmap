@@ -16,6 +16,7 @@ import networkx as nx
 from collections import OrderedDict
 
 from models.base.basic_blocks import *
+from models.base.blocks import *
 
 p = 0.7
 nclass = 1
@@ -26,7 +27,7 @@ def normalize(x: torch.Tensor):
     rinv.nan_to_num(0, 0, 0)
     rinv = rinv.diag().to(dtype=torch.float32)
     x = rinv @ x
-    return x.to(dtype=torch.float32) 
+    return x.to(dtype=torch.float32)
 
 
 def upsample(x):
@@ -55,16 +56,16 @@ class DepthDecoder(nn.Module):
         # normalize(adj), requires_grad=False).to(dtype=torch.float32)
 
         self.reduce4 = Conv1x1(num_ch_enc[4], 512, bias=False)
-        self.iconv4 = Conv3x3(512, bottleneck)
+        self.iconv4 = ConvBlock(512, bottleneck, 3, 1, 1, 1)
 
         self.reduce3 = Conv1x1(num_ch_enc[3], bottleneck, bias=False)
-        self.iconv3 = Conv3x3(bottleneck*2+1, bottleneck)
+        self.iconv3 = ConvBlock(bottleneck*2+1, bottleneck, 3, 1, 1, 1)
 
         self.reduce2 = Conv1x1(num_ch_enc[2], bottleneck, bias=False)
-        self.iconv2 = Conv3x3(bottleneck*2+1, bottleneck)
+        self.iconv2 = ConvBlock(bottleneck*2+1, bottleneck, 3, 1, 1, 1)
 
         self.reduce1 = Conv1x1(num_ch_enc[1], bottleneck, bias=False)
-        self.iconv1 = Conv3x3(bottleneck*2+1, bottleneck)
+        self.iconv1 = ConvBlock(bottleneck*2+1, bottleneck, 3, 1, 1, 1)
 
         self.crp4 = self._make_crp(bottleneck, bottleneck, stage)
         self.crp3 = self._make_crp(bottleneck, bottleneck, stage)
@@ -77,18 +78,38 @@ class DepthDecoder(nn.Module):
         self.merge1 = Conv3x3(bottleneck, bottleneck)
 
         # disp
-        self.disp4 = nn.Sequential(Conv3x3(bottleneck, 1), nn.PReLU(1))
-        self.disp3 = nn.Sequential(Conv3x3(bottleneck, 1), nn.PReLU(1))
-        self.disp2 = nn.Sequential(Conv3x3(bottleneck, 1), nn.PReLU(1))
-        self.disp1 = nn.Sequential(Conv3x3(bottleneck, 1), nn.Sigmoid())
+        self.disp4 = nn.Sequential(
+            ResBlock(bottleneck),
+            nn.PixelShuffle(2),
+            ConvBlock(bottleneck // 4, 1, 4, 2, 1)
+        )
+        self.disp3 = nn.Sequential(
+            ResBlock(bottleneck),
+            nn.PixelShuffle(2),
+            ConvBlock(bottleneck // 4, 1, 4, 2, 1)
+        )
+        self.disp2 = nn.Sequential(
+            ResBlock(bottleneck),
+            nn.PixelShuffle(2),
+            ConvBlock(bottleneck // 4, 1, 4, 2, 1)
+        )
+        self.disp1 = nn.Sequential(
+            ResBlock(bottleneck),
+            nn.PixelShuffle(2),
+            ConvBlock(bottleneck // 4, 32, 3, 1, 1),
+            nn.PixelShuffle(2),
+            ResBlock(8),
+            ConvBlock(8, 1, 3, 1, 1, act=False),
+            nn.Sigmoid()
+        )
 
         # GCN
-        self.gcn1 = GCN(self.nfeat, self.nhid, 1, 1, 0.5)
-        self.gcn2 = GCN(self.nfeat, self.nhid2, 1, 1, 0.5)
+        self.gcn1 = GCN(self.nfeat, self.nhid, 1, 1, 0.3)
+        self.gcn2 = GCN(self.nfeat, self.nhid2, 1, 1, 0.3)
         to_adj = [
-            nn.Conv2d(64, 64, 3, 2, 1),
+            nn.Conv2d(64, 64, 3, 2, 1, bias=False, groups=8),
             nn.PReLU(64),
-            nn.Conv2d(64, 64, 3, 2, 1),
+            nn.Conv2d(64, 64, 3, 2, 1, bias=False, groups=8),
             nn.PReLU(64)
         ]
         self.to_adj = nn.Sequential(*to_adj)
@@ -98,7 +119,6 @@ class DepthDecoder(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, input_features, frame_id):
-        outputs = {}
         l0, l1, l2, l3, l4 = input_features
         adj = self.to_adj(l0).view(256, 256)
         l4 = self.do(l4)
@@ -155,8 +175,6 @@ class DepthDecoder(nn.Module):
         x1 = self.crp1(x1)
         x1 = self.merge1(x1)
         x1 = F.leaky_relu(x1)
-        x1 = upsample(x1)
-        x1 = upsample(x1)
         disp1 = self.disp1(x1)
 
         return disp1
@@ -183,3 +201,38 @@ class PoseDecoder(nn.Module):
         axisangle = out[..., :3]
         translation = out[..., 3:]
         return axisangle, translation
+
+
+class PoseDecoder2(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        squeezer = [
+            nn.LazyConv2d(128, 3),
+            nn.PReLU(128)
+        ]
+
+        convs = [
+            ResBlock(256),
+            ResBlock(256),
+            nn.Conv2d(256, 1, 3, 1, 1),
+            nn.PReLU(1)
+        ]
+        linear = [
+            nn.LazyLinear(128, bias=True),
+            nn.LazyLinear(16),
+            nn.GELU()
+        ]
+
+        self.squeezer = nn.Sequential(*squeezer)
+        self.conv = nn.Sequential(*convs)
+        self.linear = nn.Sequential(*linear)
+
+    def forward(self, x: List[torch.Tensor]) -> torch.Tensor:
+        squeeze = list(map(lambda f: self.squeezer(f), x))
+
+        feature = torch.cat(squeeze, dim=1)
+
+        feature = self.conv(feature).flatten(2, 3)
+
+        out = self.linear(feature).view(1, 4, 4)
+        return out
