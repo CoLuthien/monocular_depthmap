@@ -14,6 +14,7 @@ from PIL import Image
 import cv2 as cv
 from torchvision import transforms
 from torchvision.transforms import functional as F
+from kornia.augmentation import RandomGaussianNoise
 
 
 class RTVParquetDataset(BaseParquetDataset):

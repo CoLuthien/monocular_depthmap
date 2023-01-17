@@ -31,7 +31,7 @@ class Model(pl.LightningModule):
     def __init__(self, batch, height, width) -> None:
         super().__init__()
 
-        self.depth_encoder = DepthEncoder(18, False)
+        self.depth_encoder = DepthEncoder(18, True)
         self.depth_decoder = DepthDecoder(self.depth_encoder.num_ch_enc)
 
         self.pose_decoder = PoseDecoder2()
@@ -115,23 +115,26 @@ class Model(pl.LightningModule):
         left_loss = self.compute_reprojection_loss(sample_left, c_frame)
         right_loss = self.compute_reprojection_loss(sample_right, c_frame)
 
-        ident_left_loss = self.compute_reprojection_loss(sample_left, p_frame)
+        ident_left_loss = self.compute_reprojection_loss(
+            sample_left, p_frame) + torch.randn_like(left_loss) * 1e-3
         ident_right_loss = self.compute_reprojection_loss(
-            sample_right, n_frame)
+            sample_right, n_frame) + torch.randn_like(left_loss) * 1e-3
 
         repr_loss = [left_loss, right_loss, ident_left_loss, ident_right_loss]
-        repr_loss = [l.masked_fill(mask, 0) for l in repr_loss]
+        #repr_loss = [l.masked_fill(mask, 0) for l in repr_loss]
         repr_loss = torch.cat(repr_loss, dim=1)
         repr_loss = repr_loss.mean()
 
-        mean_disp = disp.mean(2, True).mean(3, True)
-        norm_disp = disp / (mean_disp + 1e-7)
+        mean_disp = depth.mean(2, True).mean(3, True)
+        norm_disp = depth / (mean_disp + 1e-7)
 
         smooth_loss = self.get_smooth_loss(norm_disp, c_frame) * 1e-3
         smooth_loss = smooth_loss.mean()
 
         d_loss = self.correlation_loss(pl[:, 2, :, :], depth)
-        d_loss += self.correlation_loss(depth, pr[:, 2, :, :]) 
+        d_loss += self.correlation_loss(depth, pr[:, 2, :, :])
+
+        ssim_loss = self.ssim(depth, FT.rgb_to_grayscale(c_frame)).mean() * 1e-3
 
         d_loss *= 1e-4
 
@@ -142,7 +145,8 @@ class Model(pl.LightningModule):
                 self.log_dict(
                     {
                         'reprojection_loss': repr_loss,
-                        'point_cloud_correlation': d_loss
+                        'point_cloud_correlation': d_loss,
+                        'ssim_depth' : ssim_loss
                     }
                 )
                 logger.add_image('ref', make_grid(torch.cat(imgs)).cpu(),
@@ -156,7 +160,7 @@ class Model(pl.LightningModule):
                 logger.add_image('right', sample_right.clone().cpu(),
                                  step, dataformats='NCHW')
 
-        return repr_loss + d_loss
+        return repr_loss + d_loss + ssim_loss
 
     def predict_depth(self, disp, min_depth, max_depth):
         min_disp = 1 / max_depth

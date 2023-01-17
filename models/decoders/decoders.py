@@ -17,10 +17,10 @@ from einops.layers.torch import Rearrange
 
 """
 b  0   1    2   3 4
-c: 32 64 128 256 512
-   32 64 128 256
-w: 128 64 32 16 8 ** 2
-adj : (32, 64, 128, 256, 512 ) ** 2
+c: 32  64 128 256 512 encoder output
+   32  64 128 256     decoder output 
+w: 128 64 32  16  8 ** 2
+
 
 """
 
@@ -28,9 +28,6 @@ adj : (32, 64, 128, 256, 512 ) ** 2
 class Decoder(nn.Module):
     def __init__(self, dim: int = 512, width: int = 16, height: int = 16) -> None:
         super().__init__()
-
-        self.to_adjacency = AdjacencyMatrix()
-
         self.d4 = nn.Sequential(
             *[
                 nn.PixelShuffle(2),
@@ -51,12 +48,6 @@ class Decoder(nn.Module):
         self.d0 = self.make_block(dim0)
 
         # feature similarity adjacency matrix * patch relation * weight
-        self.to_patch_embedding = nn.Sequential(
-            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)',
-                      p1=height, p2=width),
-            nn.Linear(3 * height * width, 64),
-        )
-        self.gc3 = GraphConv(64, 64)
 
         self.out = nn.Sequential(
             *[
@@ -77,9 +68,7 @@ class Decoder(nn.Module):
         return nn.Sequential(*block)
 
     def forward(self, x: List[torch.Tensor], ref: torch.Tensor) -> torch.Tensor:
-
         e0, e1, e2, e3, e4 = x
-
         d4 = self.d4(e4)
 
         d3 = self.d3(torch.cat([e3, d4], dim=1))  # output: 128
@@ -91,3 +80,11 @@ class Decoder(nn.Module):
         d0 = self.d0(torch.cat([e0, d1], dim=1)) # 16
         out = self.out(d0)
         return out
+
+class GraphExtractor(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.max_pool = nn.MaxPool2d(8, 4, 2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        pass

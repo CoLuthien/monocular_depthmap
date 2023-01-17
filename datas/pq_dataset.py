@@ -59,11 +59,11 @@ class BaseParquetDataset(data.Dataset):
         start = info.id * amount + offset
         end = start + amount
         assert start < len(self.parquet_list)
+
         if end > len(self.parquet_list):
             end = len(self.parquet_list)
 
         item = self.parquet_paths[start:end]
-        print(start, end)
         self.local_parquet_length = len(item)
         return item
 

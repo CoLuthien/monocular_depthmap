@@ -77,45 +77,42 @@ class ResNetBlock(nn.Module):
         return out
 
 
+#class AdjacencyMatrix(nn.Module):
+    #def __init__(self):
+        #super(AdjacencyMatrix, self).__init__()
+        #self.spatial_pool = SpatialPyramidPooling()
+
+    #def normalize(self, x: torch.Tensor):
+        #rinv = x.sum(dim=0).float_power(-1)
+        #rinv.nan_to_num(0, 0, 0)
+        #rinv = rinv.diag().to(dtype=torch.float32)
+        #x = torch.einsum('bij,i->bij', x, rinv)
+        #return x.to(dtype=torch.float32)
+
+    #def forward(self, feature_a: torch.Tensor, feature_b: torch.Tensor) -> torch.Tensor:
+        #"""
+        #input: b x c x f, 3d tensor
+        #output: b x c x c 3d tensor
+        #"""
+        #feature_a = self.spatial_pool(feature_a)
+        #feature_b = self.spatial_pool(feature_b)
+        #dot = torch.einsum('bij,bkj -> bik', feature_a, feature_b)
+        #b, c, r = dot.size()
+        #dot = dot + torch.eye(c).to(dot.device)
+        #return self.normalize(dot)
+
 class AdjacencyMatrix(nn.Module):
-    def __init__(self):
+    def __init__(self, n_bins):
         super(AdjacencyMatrix, self).__init__()
-        self.spatial_pool = SpatialPyramidPooling()
+        self.n_bins = n_bins
 
-    def normalize(self, x: torch.Tensor):
-        rinv = x.sum(dim=0).float_power(-1)
-        rinv.nan_to_num(0, 0, 0)
-        rinv = rinv.diag().to(dtype=torch.float32)
-        x = torch.einsum('bij,i->bij', x, rinv)
-        return x.to(dtype=torch.float32)
+    def forward(self, x):
+        # Bin the values of the max pooled feature map
+        #b, c, h, w = x.size()
 
-    def forward(self, feature_a: torch.Tensor, feature_b: torch.Tensor) -> torch.Tensor:
-        """
-        input: b x c x f, 3d tensor
-        output: b x c x c 3d tensor
-        """
-        feature_a = self.spatial_pool(feature_a)
-        feature_b = self.spatial_pool(feature_b)
-        dot = torch.einsum('bij,bkj -> bik', feature_a, feature_b)
-        b, c, r = dot.size()
-        dot = dot + torch.eye(c).to(dot.device)
-        return self.normalize(dot)
+        bin = x.flatten().view(1, -1)
+        y = x.flatten().view(-1, 1)
 
+        adj = torch.isclose(bin, y, 1e-1).float()
 
-def getPoolingKernel(kernel_size=25):
-    half_size = float(kernel_size)/2.0
-    xc2 = []
-    for i in range(kernel_size):
-        xc2.append(half_size - abs(float(i)+0.5-half_size))
-    xc2 = np.array(xc2)
-    kernel = np.outer(xc2.T, xc2)
-    kernel = kernel/(half_size**2)
-    return kernel
-
-
-def get_bin_weight_kernel_size_and_stride(patch_size, num_spatial_bins):
-    ks = 2*int(patch_size / (num_spatial_bins+1))
-    stride = patch_size // num_spatial_bins
-    pad = ks // 4
-    return ks, stride, pad
-
+        return adj
