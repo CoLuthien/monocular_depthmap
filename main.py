@@ -39,16 +39,17 @@ def parse_args():
 if __name__ == '__main__':
 
     # a = CycleDepthDataset('./', ['name'], ['image'])
-    torch.set_default_dtype(torch.float32)
     dataset = RTVParquetDataset('E:/parquets', ['index'], ['image'], 1)
-    loader = data.DataLoader(dataset, batch_size=1,
-                             num_workers=6, shuffle=True, drop_last=True)
+    loader = data.DataLoader(dataset, batch_size=8,
+                             num_workers=8, shuffle=True, drop_last=True,
+                             pin_memory=True
+                             )
     device = torch.device('cuda:0')
     trainer = pl.Trainer(accelerator='gpu', devices=1,
                          logger=TensorBoardLogger('./'),
                          default_root_dir=Path('E:/models/'),
-                         max_epochs=50,
-                         min_epochs=40
+                         max_epochs=100,
+                         min_epochs=40,
                          )
-    model = Model(1, 256, 256)
+    model = Model(8, 256, 256)
     trainer.fit(model, loader)

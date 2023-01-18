@@ -70,7 +70,7 @@ class RTVParquetDataset(BaseParquetDataset):
             self.create_circular_mask(self.height, self.width)
         )
 
-    def augment(self, img: torch.Tensor, aug: Tuple, angle: float):
+    def augment(self, img: torch.Tensor, aug: Tuple):
         fn_idx, brightness_factor, contrast_factor, saturation_factor, hue_factor = aug
 
         for fn_id in fn_idx:
@@ -83,8 +83,10 @@ class RTVParquetDataset(BaseParquetDataset):
             elif fn_id == 3 and hue_factor is not None:
                 img = F.adjust_hue(img, hue_factor)
 
-        img = F.rotate(img, angle)
         return img
+
+    def rotate(self, img, angle):
+        return F.rotate(img, angle, F.InterpolationMode.BILINEAR)
 
     def create_circular_mask(self, h, w, center=None, radius=None):
 
@@ -108,19 +110,25 @@ class RTVParquetDataset(BaseParquetDataset):
                 for idx in self.frame_idxs]
         imgs = [self.decode_image(img) for img in imgs]
 
-        #def rand_angle(x): return (random.random() * 2 - 1) * x
+        def rand_angle(x): return (random.random() * 2 - 1) * x
 
-        #if random.random() > 0.5:
-            #aug = transforms.ColorJitter.get_params(
-                #self.brightness, self.contrast, self.saturation, self.hue)
+        #if random.random() > 0.3:
             #base = rand_angle(180)
             #diff = rand_angle(10)
             #angles = [base - diff, base, base + diff]
+            #imgs = [F.rotate(img, angle) for img, angle in zip(imgs, angles)]
+
+        #if random.random() > 0.6:
+            #aug = transforms.ColorJitter.get_params(
+                #self.brightness, self.contrast, self.saturation, self.hue)
 
             #imgs = [F.equalize(img) for img in imgs]
-            #imgs = [self.augment(img, aug, angle)
-                    #for img, angle in zip(imgs, angles)]
+            #imgs = [self.augment(img, aug) for img in imgs]
 
         imgs = [F.to_tensor(img) for img in imgs]
+        #if random.random() > 0.8:
+            #imgs = [1 - img for img in imgs]
+
+        imgs = [img.masked_fill(self.mask, -1e-3) for img in imgs]
 
         return imgs, self.kmat, self.kmat_inv, self.mask

@@ -15,7 +15,7 @@ from models.base.blocks import *
 
 
 class Encoder(nn.Module):
-    def __init__(self, in_dim: int, dim: int) -> None:
+    def __init__(self, in_dim: int = 3, dim: int = 32) -> None:
         super().__init__()
 
         self.e0 = self.make_block(in_dim, dim)
@@ -28,7 +28,9 @@ class Encoder(nn.Module):
         block = [
             ConvBlock(in_dim, dim // 2, 4, 2, 1),
             ResBlock(dim // 2),
+            ResBlock(dim // 2),
             ConvBlock(dim // 2, dim, 3, 1, 1),
+            ResBlock(dim),
             ResBlock(dim),
         ]
         return nn.Sequential(*block)

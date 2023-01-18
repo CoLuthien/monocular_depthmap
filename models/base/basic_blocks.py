@@ -28,18 +28,19 @@ class ResBlock(nn.Module):
         super().__init__()
         blocks = [
             nn.Conv2d(channel, channel, 3, 1, 1, bias=False),
-            nn.LeakyReLU(0.1),
+            nn.GELU(),
             nn.GroupNorm(1, channel),
             nn.Conv2d(channel, channel, 1, bias=False)
         ]
 
         self.blocks = nn.Sequential(*blocks)
-        self.act = nn.LeakyReLU(0.1)
+        self.act = nn.GELU()
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.blocks(x)
 
         return self.act(out + x)
+
 
 class ConvBlock(nn.Module):
     def __init__(
@@ -67,7 +68,7 @@ class ConvBlock(nn.Module):
         ]
         layer += [nn.GroupNorm(1, outp)]  # layernorm
         if act:
-            layer += [nn.PReLU(outp)]
+            layer += [nn.GELU()]
         self.block = nn.Sequential(*layer)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -186,9 +187,11 @@ class Backproject(nn.Module):
         self.pix_coords = torch.cat([self.pix_coords, self.ones], 1)
 
     def forward(self, depth: torch.Tensor, inv_K) -> torch.Tensor:
-        cam_points = torch.matmul(inv_K[:, :3, :3], self.pix_coords.to(device=depth.device))
+        cam_points = torch.matmul(
+            inv_K[:, :3, :3], self.pix_coords.to(device=depth.device))
         cam_points = depth.view(self.batch_size, 1, -1) * cam_points
-        cam_points = torch.cat([cam_points, self.ones.to(device=depth.device)], dim=1)
+        cam_points = torch.cat(
+            [cam_points, self.ones.to(device=depth.device)], dim=1)
         return cam_points
 
 

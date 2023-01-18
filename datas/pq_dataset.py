@@ -86,7 +86,7 @@ class BaseParquetDataset(data.Dataset):
 
     def __getitem__(self, index):
         # check current file end
-        if len(self.local_parquet_data) <= 3:
+        if len(self.local_parquet_data) < 3:
             # if we use all parquet data in current cache
             if self.local_parquet_list is None:
                 self.local_parquet_list = self.fetch_local_parquet_list()

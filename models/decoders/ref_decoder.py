@@ -30,6 +30,14 @@ def normalize(x: torch.Tensor):
     return x.to(dtype=torch.float32)
 
 
+# def normalize(x: torch.Tensor):
+    #rinv = x.sum(dim=0).float_power(-1)
+    #rinv.nan_to_num(0, 0, 0)
+    #rinv = rinv.diag().to(dtype=torch.float32)
+    #x = torch.einsum('bij,i->bij', x, rinv)
+    # return x.to(dtype=torch.float32)
+
+
 def upsample(x):
     return F.interpolate(x, scale_factor=2, mode="nearest")
 
@@ -218,9 +226,9 @@ class PoseDecoder2(nn.Module):
             nn.PReLU(1)
         ]
         linear = [
-            nn.LazyLinear(256, bias=True),
-            nn.LazyLinear(16),
-            nn.Tanh()
+            nn.LazyLinear(256, bias=False),
+            nn.LazyLinear(16, bias=True),
+            nn.Tanh(),
         ]
 
         self.squeezer = nn.Sequential(*squeezer)
@@ -234,5 +242,5 @@ class PoseDecoder2(nn.Module):
 
         feature = self.conv(feature).flatten(2, 3)
 
-        out = self.linear(feature).view(1, 4, 4)
+        out = self.linear(feature).view(-1, 4, 4)
         return out
