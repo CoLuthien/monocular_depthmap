@@ -13,6 +13,7 @@ from torch.nn.modules.module import Module
 import scipy.sparse as sp
 
 from torchvision.transforms import Resize
+import einops
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 
@@ -82,48 +83,30 @@ class ResNetBlock(nn.Module):
         return out
 
 
-# class AdjacencyMatrix(nn.Module):
-    # def __init__(self):
-        #super(AdjacencyMatrix, self).__init__()
-        #self.spatial_pool = SpatialPyramidPooling()
-
-    # def normalize(self, x: torch.Tensor):
-        #rinv = x.sum(dim=0).float_power(-1)
-        #rinv.nan_to_num(0, 0, 0)
-        #rinv = rinv.diag().to(dtype=torch.float32)
-        #x = torch.einsum('bij,i->bij', x, rinv)
-        # return x.to(dtype=torch.float32)
-
-    # def forward(self, feature_a: torch.Tensor, feature_b: torch.Tensor) -> torch.Tensor:
-        # """
-        # input: b x c x f, 3d tensor
-        # output: b x c x c 3d tensor
-        # """
-        #feature_a = self.spatial_pool(feature_a)
-        #feature_b = self.spatial_pool(feature_b)
-        #dot = torch.einsum('bij,bkj -> bik', feature_a, feature_b)
-        #b, c, r = dot.size()
-        #dot = dot + torch.eye(c).to(dot.device)
-        # return self.normalize(dot)
-
 class AdjacencyMatrix(nn.Module):
-    def __init__(self, n_bins):
+    def __init__(self, n_class):
         super(AdjacencyMatrix, self).__init__()
-        self.n_bins = n_bins
+        self.n_class = n_class
+
+    def normalize(self, x: torch.Tensor):
+        rinv = x.sum(dim=0).float_power(-1)
+        rinv.nan_to_num(0, 0, 0)
+        rinv = rinv.diag().to(dtype=torch.float32)
+        x = torch.einsum('bij,i->bij', x, rinv)
+        return x.to(dtype=torch.float32)
 
     def forward(self, x: torch.Tensor):
         # Bin the values of the max pooled feature map
-        b, c, h, w = x.size()
-        bin = x.flatten().view(b, 1, -1)
-        y = x.flatten().view(b, -1, 1)
+        b, _, _ = x.size()
+        bin = x.view(b, -1, self.n_class)
+        y = bin.transpose(1, 2)
+        adj = torch.einsum('bij,bjk -> bik', bin, y)
 
-        adj = torch.isclose(bin, y, 1e-1).float()
-
-        return adj
+        return self.normalize(adj)
 
 
 class FeatureConnection(nn.Module):
-    def __init__(self, patch_per_direction: int, feature_count: int, bin_count: int = 32, resize_to: int = 256) -> None:
+    def __init__(self, patch_per_direction: int, n_label: int, resize_to: int = 256) -> None:
         super().__init__()
         patch_size = resize_to // patch_per_direction
 
@@ -132,9 +115,10 @@ class FeatureConnection(nn.Module):
             Resize(resize_to),
             Rearrange('b c (h p1) (w p2) -> b h w (p1 p2 c)',
                       p1=patch_size, p2=patch_size),
-            nn.Linear(3 * patch_size ** 2, feature_count),
-            Rearrange('b h w c -> b c h w'),
-            AdjacencyMatrix(bin_count)
+            nn.Linear(3 * patch_size ** 2, n_label),
+            nn.Softmax(dim=3),
+            Rearrange('b h w c -> b (h w) c'),
+            AdjacencyMatrix(n_label)
         )
 
     def forward(self, batched_img: torch.Tensor) -> torch.Tensor:
