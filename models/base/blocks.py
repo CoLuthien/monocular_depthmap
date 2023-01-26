@@ -156,7 +156,6 @@ class FeatureConnection(nn.Module):
         # p ** 2 patch, f feature per patch => (p**2) * f object
         self.block = nn.Sequential(
             Resize(resize_to),
-            ResBlock(3),
             Rearrange('b c (h p1) (w p2) -> b h w (p1 p2 c)',
                       p1=patch_size, p2=patch_size),
             nn.Linear(3 * patch_size ** 2, n_label),

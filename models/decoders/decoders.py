@@ -32,13 +32,12 @@ class Decoder(nn.Module):
         self.d4 = nn.Sequential(
             *[
                 nn.PixelShuffle(2),
-                ConvBlock(dim // 4, dim // 4, 3, 1, 1, g=4),
+                ConvBlock(dim // 4, dim // 4, 3, 1, 1),
                 ResBlock(dim//4),
-                ConvBlock(dim // 4, dim // 2, 3, 1, 1, g=4),
+                ConvBlock(dim // 4, dim // 2, 3, 1, 1),
                 ResBlock(dim // 2)
             ]
         )
-        self.pyramid_pool = SpatialPyramidPooling(pool_type='avg')
 
         dim3 = dim // 4  # input: 512, output 128
         self.d3 = self.make_block(dim3)
