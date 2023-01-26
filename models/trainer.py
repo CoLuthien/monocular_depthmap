@@ -142,7 +142,7 @@ class Model(pl.LightningModule):
         smooth_loss = self.get_smooth_loss(norm_disp, c_frame)
         smooth_loss = smooth_loss.mean() * 1e-4
 
-        #d_loss = self.correlation_loss(pl[:, :3, :, :], pr[:, :3, :, :])
+        d_loss = self.correlation_loss(pl[:, :3, :, :], pr[:, :3, :, :])
         #d_loss *= 1e-3
 
         step = self.global_step
@@ -153,6 +153,7 @@ class Model(pl.LightningModule):
                     {
                         'reprojection_loss': min_reconstruct_loss,
                         'smooth_loss': smooth_loss,
+                        'correlation_loss' : d_loss,
                         # 'left_mid_corr': d_loss1,
                         # 'right_mid_corr': d_loss2,
                         # 'left_right_corr': d_loss3,
@@ -169,7 +170,7 @@ class Model(pl.LightningModule):
                 logger.add_image('right', sample_right.clone().cpu(),
                                  step, dataformats='NCHW')
 
-        return min_reconstruct_loss + smooth_loss
+        return min_reconstruct_loss + smooth_loss + d_loss
 
     def gradient(self, D):
         dy = D[:, :, 1:] - D[:, :, :-1]
