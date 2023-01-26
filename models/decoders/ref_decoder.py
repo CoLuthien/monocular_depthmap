@@ -227,8 +227,8 @@ class PoseDecoder2(nn.Module):
         ]
         linear = [
             nn.LazyLinear(256, bias=False),
-            nn.LazyLinear(16, bias=True),
-            nn.Tanh(),
+            nn.ReLU(True),
+            nn.LazyLinear(16, bias=False),
         ]
 
         self.squeezer = nn.Sequential(*squeezer)

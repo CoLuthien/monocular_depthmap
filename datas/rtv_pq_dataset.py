@@ -15,6 +15,7 @@ import cv2 as cv
 from torchvision import transforms
 from torchvision.transforms import functional as F
 from kornia.augmentation import RandomGaussianNoise
+from kornia.enhance import equalize
 
 
 class RTVParquetDataset(BaseParquetDataset):
@@ -126,9 +127,9 @@ class RTVParquetDataset(BaseParquetDataset):
             #imgs = [self.augment(img, aug) for img in imgs]
 
         imgs = [F.to_tensor(img) for img in imgs]
-        #if random.random() > 0.8:
-            #imgs = [1 - img for img in imgs]
+        if random.random() > 0.8:
+            imgs = [equalize(img) for img in imgs]
 
-        imgs = [img.masked_fill(self.mask, -1e-3) for img in imgs]
+        #imgs = [img.masked_fill(self.mask, -1e-3) for img in imgs]
 
         return imgs, self.kmat, self.kmat_inv, self.mask

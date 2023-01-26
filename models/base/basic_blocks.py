@@ -23,57 +23,8 @@ class Conv1x1(nn.Module):
         return out
 
 
-class ResBlock(nn.Module):
-    def __init__(self, channel: int) -> None:
-        super().__init__()
-        blocks = [
-            nn.Conv2d(channel, channel, 3, 1, 1, bias=False),
-            nn.GELU(),
-            nn.GroupNorm(1, channel),
-            nn.Conv2d(channel, channel, 1, bias=False)
-        ]
-
-        self.blocks = nn.Sequential(*blocks)
-        self.act = nn.GELU()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.blocks(x)
-
-        return self.act(out + x)
 
 
-class ConvBlock(nn.Module):
-    def __init__(
-        self,
-        inp: int,
-        outp: int,
-        k: int,
-        s: int = 1,
-        p: int = 0,
-        g: int = 1,
-        act: bool = True,
-    ) -> None:
-        super().__init__()
-        layer = [
-            nn.Conv2d(
-                inp,
-                outp,
-                k,
-                s,
-                p,
-                groups=g,
-                padding_mode="reflect",
-                bias=False,
-            ),
-        ]
-        layer += [nn.GroupNorm(1, outp)]  # layernorm
-        if act:
-            layer += [nn.GELU()]
-        self.block = nn.Sequential(*layer)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.block(x)
-        return x
 
 
 class Conv3x3(nn.Module):
@@ -218,4 +169,4 @@ class Project(nn.Module):
         pix_coords[..., 0] *= coef
         pix_coords[..., 1] *= coef
 
-        return F.tanh(pix_coords)
+        return pix_coords

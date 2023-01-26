@@ -40,9 +40,8 @@ if __name__ == '__main__':
 
     # a = CycleDepthDataset('./', ['name'], ['image'])
     dataset = RTVParquetDataset('E:/parquets', ['index'], ['image'], 1)
-    loader = data.DataLoader(dataset, batch_size=8,
+    loader = data.DataLoader(dataset, batch_size=4,
                              num_workers=8, shuffle=True, drop_last=True,
-                             pin_memory=True
                              )
     device = torch.device('cuda:0')
     trainer = pl.Trainer(accelerator='gpu', devices=1,
@@ -51,5 +50,5 @@ if __name__ == '__main__':
                          max_epochs=100,
                          min_epochs=40,
                          )
-    model = Model(8, 256, 256)
+    model = Model(4, 256, 256)
     trainer.fit(model, loader)

@@ -30,8 +30,22 @@ class GraphConv(Module):
         # out : (b, c, outp)
         support = self.weight(img_feature)
         output = channel_conn @ support
+        return output
 
-        return F.softmax(output, dim=1)
+
+class GCNet(nn.Module):
+    def __init__(self, nfeat: int, nhid: int, n_out: int):
+        super(GCNet, self).__init__()
+
+        self.gc1 = GraphConv(nfeat, nhid)
+        self.gc2 = GraphConv(nhid, n_out)
+        self.dropout = nn.Dropout()
+
+    def forward(self, adj, x):
+        x = F.relu(self.gc1(adj, x))
+        x = self.dropout(x)
+        x = self.gc2(adj, x)
+        return x
 
 
 class SpatialPyramidPooling(nn.Module):
@@ -59,32 +73,8 @@ class SpatialPyramidPooling(nn.Module):
         return out
 
 
-class ResNetBlock(nn.Module):
-    def __init__(self, in_channels):
-        super(ResNetBlock, self).__init__()
-        self.conv1 = nn.Conv2d(
-            in_channels, in_channels, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(in_channels)
-
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(in_channels, in_channels,
-                               kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(in_channels)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out = self.bn2(out)
-        out += residual
-        out = self.relu(out)
-        return out
-
-
 class AdjacencyMatrix(nn.Module):
-    def __init__(self, n_class):
+    def __init__(self, n_class: int):
         super(AdjacencyMatrix, self).__init__()
         self.n_class = n_class
 
@@ -102,7 +92,60 @@ class AdjacencyMatrix(nn.Module):
         y = bin.transpose(1, 2)
         adj = torch.einsum('bij,bjk -> bik', bin, y)
 
-        return self.normalize(adj)
+        return adj
+
+
+class ConvBlock(nn.Module):
+    def __init__(
+        self,
+        inp: int,
+        outp: int,
+        k: int,
+        s: int = 1,
+        p: int = 0,
+        g: int = 1,
+        act: bool = True,
+    ) -> None:
+        super().__init__()
+        layer = [
+            nn.Conv2d(
+                inp,
+                outp,
+                k,
+                s,
+                p,
+                groups=g,
+                bias=False,
+            ),
+        ]
+        layer += [nn.GroupNorm(1, outp)]  # layernorm
+        if act:
+            layer += [nn.ReLU(True)]
+        self.block = nn.Sequential(*layer)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.block(x)
+        return x
+
+
+class ResBlock(nn.Module):
+    def __init__(self, in_c: int, out_c: int = 128) -> None:
+        super().__init__()
+        blocks = [
+            nn.Conv2d(in_c, out_c, 1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_c, out_c, 3, 1, 1, groups=32, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_c, in_c, 1, bias=False),
+        ]
+
+        self.blocks = nn.Sequential(*blocks)
+        self.act = nn.ReLU(inplace=True)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.blocks(x)
+
+        return self.act(out + x)
 
 
 class FeatureConnection(nn.Module):
@@ -113,11 +156,12 @@ class FeatureConnection(nn.Module):
         # p ** 2 patch, f feature per patch => (p**2) * f object
         self.block = nn.Sequential(
             Resize(resize_to),
+            ResBlock(3),
             Rearrange('b c (h p1) (w p2) -> b h w (p1 p2 c)',
                       p1=patch_size, p2=patch_size),
             nn.Linear(3 * patch_size ** 2, n_label),
-            nn.Softmax(dim=3),
             Rearrange('b h w c -> b (h w) c'),
+            nn.Softmax(dim=1),
             AdjacencyMatrix(n_label)
         )
 

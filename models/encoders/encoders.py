@@ -12,6 +12,7 @@ from collections import OrderedDict
 
 from models.base.basic_blocks import *
 from models.base.blocks import *
+from einops.layers.torch import Rearrange
 
 
 class Encoder(nn.Module):
@@ -26,12 +27,11 @@ class Encoder(nn.Module):
 
     def make_block(self, in_dim: int, dim: int) -> List[nn.Module]:
         block = [
-            ConvBlock(in_dim, dim // 2, 4, 2, 1),
-            ResBlock(dim // 2),
-            ResBlock(dim // 2),
-            ConvBlock(dim // 2, dim, 3, 1, 1),
-            ResBlock(dim),
-            ResBlock(dim),
+            ConvBlock(in_dim, dim // 4, 4, 2, 1),
+            ResBlock(dim // 4),
+            ConvBlock(dim // 4, dim // 2, 1),
+            ResBlock(dim//2),
+            ConvBlock(dim // 2, dim, 3, 1, 1)
         ]
         return nn.Sequential(*block)
 
